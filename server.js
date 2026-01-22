@@ -6,7 +6,7 @@ require('dotenv').config();
 
 /**
  * FORGE AI BACKEND - OAUTH & INJECTION ENGINE
- * VERSION: 1.0.17 - Explicit Project & Permission Binding
+ * VERSION: 1.0.18 - Test Handshake Logging
  */
 
 let db;
@@ -48,12 +48,12 @@ app.use((req, res, next) => {
     next();
 });
 
-app.get('/', (req, res) => res.send(`Forge v1.0.17 Live. <a href="/health">Check Health</a>`));
+app.get('/', (req, res) => res.send(`Forge v1.0.18 Live. <a href="/health">Check Health</a>`));
 
 app.get('/health', (req, res) => {
     res.json({
         status: "Online",
-        version: "1.0.17",
+        version: "1.0.18",
         firebase: !!admin.apps.length,
         projectId: "forgedmapp",
         env: {
@@ -69,6 +69,8 @@ app.get('/health', (req, res) => {
  */
 app.get('/api/test/handshake', async (req, res) => {
     const { uid } = req.query;
+    console.log(`🧪 Handshake Test Initiated for UID: ${uid || 'UNKNOWN'}`);
+    
     if (!uid) return res.status(400).send("Missing uid.");
 
     try {
@@ -79,8 +81,10 @@ app.get('/api/test/handshake', async (req, res) => {
         await userRef.set({
             tier: 'Commander',
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            diagnostic: "v1.0.17-passed"
+            diagnostic: "v1.0.18-passed"
         }, { merge: true });
+
+        console.log(`✨ Handshake Success for ${uid}`);
 
         res.send(`
             <html>
@@ -88,7 +92,7 @@ app.get('/api/test/handshake', async (req, res) => {
                     <div style="text-align: center; border: 1px solid #34d399; padding: 40px; border-radius: 20px; background: #064e3b; max-width: 500px; box-shadow: 0 0 50px rgba(52,211,153,0.3);">
                         <h1 style="color: #34d399;">FIRESTORE VERIFIED</h1>
                         <p>Project: <b>forgedmapp</b></p>
-                        <p>Status: Permission binding successful.</p>
+                        <p>Status: Permission binding successful (v1.0.18).</p>
                         <script>
                             localStorage.setItem('rank_${uid}', 'Commander');
                             setTimeout(() => window.close(), 4000);
@@ -154,4 +158,4 @@ app.get('/api/shopify/callback', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`🔥 Forge Engine v1.0.17 active`));
+app.listen(PORT, () => console.log(`🔥 Forge Engine v1.0.18 active`));
