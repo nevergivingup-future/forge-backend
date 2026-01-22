@@ -6,31 +6,21 @@ require('dotenv').config();
 
 /**
  * FORGE AI BACKEND - OAUTH & INJECTION ENGINE
- * VERSION: 1.0.21 - Ready for Live Testing
+ * VERSION: 1.0.26 - Enhanced Handshake & Signal
  */
 
 let db;
-let initializedProjectId = "Unknown";
-
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     try {
         const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-        initializedProjectId = serviceAccount.project_id;
-        
         if (!admin.apps.length) {
             admin.initializeApp({
                 credential: admin.credential.cert(serviceAccount),
                 projectId: serviceAccount.project_id 
             });
         }
-        
         db = admin.firestore();
-        db.settings({ ignoreUndefinedProperties: true });
-        
-        console.log(`✅ Forge Firebase Engine: Online (Project: ${serviceAccount.project_id})`);
-    } catch (e) {
-        console.error("❌ Firebase Init Error:", e.message);
-    }
+    } catch (e) { console.error("Firebase Init Error:", e.message); }
 }
 
 const app = express();
@@ -43,142 +33,96 @@ const SHOPIFY_API_KEY = process.env.SHOPIFY_CLIENT_ID;
 const SHOPIFY_API_SECRET = process.env.SHOPIFY_CLIENT_SECRET;
 const BACKEND_URL = "https://forge-backend-production-b124.up.railway.app";
 
-app.use((req, res, next) => {
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
-    next();
-});
+app.get('/health', (req, res) => res.json({ status: "Online", version: "1.0.26", firebase: !!db }));
 
-app.get('/', (req, res) => res.send(`Forge v1.0.21 Live. <a href="/health">Check Health</a>`));
-
-app.get('/health', (req, res) => {
-    res.json({
-        status: "Online",
-        version: "1.0.21",
-        firebase: !!admin.apps.length,
-        projectId: initializedProjectId,
-        env: {
-            hasApiKey: !!SHOPIFY_API_KEY,
-            hasSecret: !!SHOPIFY_API_SECRET
-        }
-    });
-});
-
-/**
- * TEST HANDSHAKE
- * Diagnostic for forgedmapp Firestore.
- */
-app.get('/api/test/handshake', async (req, res) => {
-    const { uid } = req.query;
-    console.log(`🧪 Handshake Test Initiated for UID: ${uid || 'UNKNOWN'}`);
-    
-    if (!uid) return res.status(400).send("Missing uid.");
-
-    try {
-        if (!db) throw new Error("Firestore not initialized. Check your Service Account JSON.");
-
-        const userRef = db.collection('artifacts').doc(appId).collection('users').doc(uid);
-        
-        await userRef.set({
-            tier: 'Commander',
-            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            diagnostic: "v1.0.21-passed",
-            projectBound: initializedProjectId
-        }, { merge: true });
-
-        console.log(`✨ Handshake Success for ${uid}`);
-
-        res.send(`
-            <html>
-                <body style="background: #0A0A0B; color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; padding: 20px;">
-                    <div style="text-align: center; border: 1px solid #34d399; padding: 40px; border-radius: 20px; background: #064e3b; max-width: 500px; box-shadow: 0 0 50px rgba(52,211,153,0.3);">
-                        <h1 style="color: #34d399;">FIRESTORE VERIFIED</h1>
-                        <p>Project: <b>${initializedProjectId}</b></p>
-                        <p>Status: Handshake Success (v1.0.21).</p>
-                        <script>
-                            localStorage.setItem('rank_${uid}', 'Commander');
-                            setTimeout(() => window.close(), 4000);
-                        </script>
-                    </div>
-                </body>
-            </html>
-        `);
-    } catch (e) {
-        console.error("❌ Firestore Error:", e);
-        res.status(500).send(`
-            <div style="font-family: sans-serif; padding: 40px; background: #1a1a1a; color: #fecaca; height: 100vh; line-height: 1.6;">
-                <h1 style="color: #ef4444;">Handshake Failed (v1.0.21)</h1>
-                <p><b>Technical Error:</b> ${e.message}</p>
-                <hr style="border-color: #7f1d1d;">
-                <p><b>Diagnosis for ${initializedProjectId}:</b></p>
-                <p>Ensure your Firestore Database instance is created and set to "Test Mode" in the Firebase Console.</p>
-            </div>
-        `);
-    }
-});
-
-// --- OAUTH ENDPOINTS ---
-
+// 1. Redirect to Shopify
 app.get('/api/auth/shopify', (req, res) => {
     const { shop, uid } = req.query;
-    if (!shop) return res.status(400).send("Missing shop");
-    const scopes = 'read_products,write_products,read_content,write_content';
+    if (!shop) return res.status(400).send("Missing shop domain");
+    
+    // Ensure the shop URL is clean
+    const cleanShop = shop.includes('myshopify.com') ? shop : `${shop}.myshopify.com`;
+    
+    const scopes = 'read_products,write_products';
     const redirectUri = `${BACKEND_URL}/api/shopify/callback`;
-    const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${SHOPIFY_API_KEY}&scope=${scopes}&redirect_uri=${redirectUri}&state=${uid || 'anon'}`;
+    
+    const installUrl = `https://${cleanShop}/admin/oauth/authorize?client_id=${SHOPIFY_API_KEY}&scope=${scopes}&redirect_uri=${redirectUri}&state=${uid || 'anon'}`;
+    
+    console.log(`🔗 Authorizing Store: ${cleanShop} for UID: ${uid}`);
     res.redirect(installUrl);
 });
 
-/**
- * SHOPIFY CALLBACK - AUTO UPGRADE ENGINE
- */
+// 2. Callback from Shopify
 app.get('/api/shopify/callback', async (req, res) => {
     const { shop, code, state: uid } = req.query;
-    if (!code) return res.status(400).send("No code");
+    if (!code) return res.status(400).send("No authorization code provided");
 
     try {
-        console.log(`🔄 Processing OAuth for ${shop}...`);
-        
+        // Exchange code for token
         const response = await axios.post(`https://${shop}/admin/oauth/access_token`, {
             client_id: SHOPIFY_API_KEY,
             client_secret: SHOPIFY_API_SECRET,
             code
         });
 
-        // MERCHANT AUTO-UPGRADE LOGIC
+        const accessToken = response.data.access_token;
+
+        // CRITICAL: Force the Firestore Update
         if (db && uid && uid !== 'anon') {
             const userRef = db.collection('artifacts').doc(appId).collection('users').doc(uid);
             
-            // Auto-promoting to Commander on successful Shopify link
             await userRef.set({
                 tier: 'Commander', 
                 shopUrl: shop,
-                shopifyToken: response.data.access_token,
+                shopifyToken: accessToken,
                 updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-                upgradeSource: 'shopify_oauth_auto'
+                handshakeVersion: "1.0.26"
             }, { merge: true });
             
-            console.log(`🎖️ Merchant ${uid} Auto-Upgraded to Commander via ${shop}`);
+            console.log(`🎖️ UID ${uid} successfully promoted to COMMANDER`);
         }
 
+        // Return a high-visibility success page
         res.send(`
             <html>
-                <body style="background: #0A0A0B; color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0;">
-                    <div style="text-align: center;">
-                        <h1 style="color: #f59e0b;">RANK ACTIVATED</h1>
-                        <p>Your store <b>${shop}</b> is now connected.</p>
-                        <p>You have been promoted to <b>Commander</b>.</p>
+                <head>
+                    <title>Forge Verified</title>
+                    <meta name="viewport" content="width=device-width, initial-scale=1">
+                    <style>
+                        body { background: #0A0A0B; color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+                        .card { border: 2px solid #f59e0b; padding: 40px; border-radius: 30px; text-align: center; background: #121214; box-shadow: 0 0 50px rgba(245,158,11,0.2); }
+                        h1 { color: #f59e0b; font-size: 2.5rem; margin: 0 0 10px 0; font-style: italic; font-weight: 900; }
+                        p { opacity: 0.6; font-size: 0.9rem; letter-spacing: 1px; }
+                        .loader { width: 40px; height: 40px; border: 3px solid #f59e0b; border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; margin: 20px auto; }
+                        @keyframes spin { to { transform: rotate(360deg); } }
+                    </style>
+                </head>
+                <body>
+                    <div class="card">
+                        <h1>RANK ACTIVATED</h1>
+                        <p>COMMANDER STATUS VERIFIED</p>
+                        <div class="loader"></div>
+                        <p style="font-size: 10px; margin-top: 20px;">SYNCING WITH TERMINAL...</p>
                         <script>
+                            // Set local storage just in case, but Firebase listener is the primary driver
                             localStorage.setItem('rank_${uid}', 'Commander');
-                            setTimeout(() => window.close(), 3000);
+                            setTimeout(() => { window.close(); }, 2500);
                         </script>
                     </div>
                 </body>
             </html>
         `);
     } catch (e) {
-        console.error("❌ OAuth/Upgrade Error:", e.message);
-        res.status(500).send("Authorization failed. Please try again.");
+        console.error("❌ Handshake Error:", e.response?.data || e.message);
+        res.status(500).send(`
+            <div style="background: #1a1a1a; color: #fecaca; padding: 40px; font-family: sans-serif;">
+                <h1>Handshake Failed</h1>
+                <p>${e.message}</p>
+                <button onclick="window.close()">Close and Try Again</button>
+            </div>
+        `);
     }
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`🔥 Forge Engine v1.0.21 active`));
+app.listen(PORT, () => console.log(`🔥 Forge Engine v1.0.26 Live on Port ${PORT}`));
