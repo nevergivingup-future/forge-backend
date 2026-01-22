@@ -5,12 +5,10 @@ const admin = require('firebase-admin');
 require('dotenv').config();
 
 /**
- * FORGE AI BACKEND - SERVER.JS
- * Handles Shopify OAuth, Product Injections, and 
- * updates the Firebase tier for your users automatically.
+ * FORGE AI BACKEND - OAUTH & INJECTION ENGINE
  */
 
-// Initialize Firebase Admin (Required for secure database updates)
+// Initialize Firebase
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     try {
         const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
@@ -19,7 +17,7 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT) {
         });
         console.log("✅ Forge Firebase Engine: Online");
     } catch (e) {
-        console.error("❌ Firebase Init Error: Verify your FIREBASE_SERVICE_ACCOUNT variable.");
+        console.error("❌ Firebase Init Error");
     }
 }
 
@@ -28,87 +26,87 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const TIKAPI_KEY = process.env.TIKAPI_KEY;
-const CLIENT_ID = process.env.SHOPIFY_CLIENT_ID;
-const CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET;
+// Environment Variables from Railway
+const SHOPIFY_API_KEY = process.env.SHOPIFY_CLIENT_ID;
+const SHOPIFY_API_SECRET = process.env.SHOPIFY_CLIENT_SECRET;
+const BACKEND_URL = "https://forge-backend-production-b124.up.railway.app";
 
-// 1. OAUTH HANDSHAKE: Triggered when user clicks "Connect Store"
+app.get('/', (req, res) => res.send("Forge Engine is running."));
+
+// --- STEP 1: START THE HANDSHAKE ---
+// Matches your Dashboard App URL: /api/auth/shopify
 app.get('/api/auth/shopify', (req, res) => {
-    const { shop, uid, appId } = req.query; 
-    if (!shop || !uid) return res.status(400).send("Missing required parameters (shop/uid).");
-
-    const protocol = req.headers['x-forwarded-proto'] || 'http';
-    const host = req.get('host');
-    const redirectUri = `${protocol}://${host}/api/shopify/callback`;
-
-    const scopes = "write_products,read_analytics,write_script_tags";
-    // Passing user metadata through the 'state' parameter to link the token back to the right UID
-    const state = JSON.stringify({ uid, appId });
+    const { shop, uid } = req.query;
     
-    const authUrl = `https://${shop}/admin/oauth/authorize?client_id=${CLIENT_ID}&scope=${scopes}&redirect_uri=${redirectUri}&state=${state}`;
-    res.redirect(authUrl);
+    if (!shop) return res.status(400).send("Missing shop parameter");
+
+    // Scopes match your Shopify Partner Dashboard exactly
+    const scopes = 'read_products,write_products,read_content,write_content';
+    
+    // Redirect URI matches your Shopify Partner Dashboard: /api/shopify/callback
+    const redirectUri = `${BACKEND_URL}/api/shopify/callback`;
+    
+    // We pass the UID as the state to identify the user on return
+    const state = uid || "default_merchant";
+    
+    const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${SHOPIFY_API_KEY}&scope=${scopes}&redirect_uri=${redirectUri}&state=${state}`;
+    
+    console.log(`🚀 Redirecting to Shopify for store: ${shop}`);
+    res.redirect(installUrl);
 });
 
-// 2. OAUTH CALLBACK: Exchange code for token & Auto-Upgrade User
+// --- STEP 2: COMPLETE THE HANDSHAKE (CALLBACK) ---
+// Matches your Dashboard Redirect URL: /api/shopify/callback
 app.get('/api/shopify/callback', async (req, res) => {
-    const { shop, code, state } = req.query;
-    try {
-        const { uid, appId } = JSON.parse(state);
+    const { shop, code, state: uid } = req.query;
 
-        const response = await axios.post(`https://${shop}/admin/oauth/access_token`, {
-            client_id: CLIENT_ID,
-            client_secret: CLIENT_SECRET,
+    if (!code) return res.status(400).send("No authorization code provided");
+
+    try {
+        // Exchange authorization code for permanent Access Token
+        const accessTokenResponse = await axios.post(`https://${shop}/admin/oauth/access_token`, {
+            client_id: SHOPIFY_API_KEY,
+            client_secret: SHOPIFY_API_SECRET,
             code
         });
-        
-        const accessToken = response.data.access_token;
 
-        // SECURE STORAGE & AUTO-UPGRADE
-        // We update the user's profile to 'Commander' (Merchant) status automatically
-        await db.doc(`artifacts/${appId}/users/${uid}/settings/profile`).set({
-            accessToken: accessToken,
-            shopUrl: shop,
-            storeLinked: true,
-            tier: 'Commander',
-            upgradedAt: admin.firestore.FieldValue.serverTimestamp()
-        }, { merge: true });
+        const accessToken = accessTokenResponse.data.access_token;
+        console.log(`✅ Access Token secured for ${shop}`);
 
+        // Update Rank to Commander in Firestore
+        if (db && uid && uid !== "default_merchant") {
+            const userRef = db.collection('artifacts').doc('forge-app').collection('users').doc(uid);
+            await userRef.set({
+                tier: 'Commander',
+                shopUrl: shop,
+                shopifyToken: accessToken,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            console.log(`🏆 User ${uid} promoted to Commander`);
+        }
+
+        // Return Success UI to close the window
         res.send(`
-            <div style="font-family:sans-serif; text-align:center; padding: 50px; background: #0A0A0B; color: white; height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center;">
-                <div style="background: #f59e0b; width: 80px; height: 80px; border-radius: 24px; display: flex; align-items: center; justify-content: center; margin-bottom: 24px; box-shadow: 0 0 30px rgba(245, 158, 11, 0.3);">
-                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                </div>
-                <h1 style="margin: 0; font-size: 36px; font-weight: 900; font-style: italic; text-transform: uppercase; letter-spacing: -1px;">Forge Linked</h1>
-                <p style="color: #64748b; margin-top: 10px; font-size: 18px;">Merchant Status: <strong>Commander (Activated)</strong></p>
-                <p style="color: #475569; font-size: 14px; margin-top: 20px;">You can now close this window and return to the app.</p>
-            </div>
+            <html>
+                <body style="background: #0A0A0B; color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0;">
+                    <div style="text-align: center; border: 1px solid #f59e0b; padding: 40px; border-radius: 20px; background: #121214; max-width: 400px; box-shadow: 0 0 50px rgba(245,158,11,0.2);">
+                        <h1 style="color: #f59e0b; margin-bottom: 10px; font-size: 2rem;">RANK ACTIVATED</h1>
+                        <p style="color: #94a3b8;">Neural link to <b>${shop}</b> established.</p>
+                        <p style="font-size: 0.8rem; color: #475569; margin-top: 20px;">Closing window and returning to Forge Terminal...</p>
+                        <script>
+                            // Signal the local session
+                            localStorage.setItem('rank_${uid}', 'Commander');
+                            setTimeout(() => window.close(), 2500);
+                        </script>
+                    </div>
+                </body>
+            </html>
         `);
     } catch (error) {
-        console.error("OAuth Exchange Error:", error);
-        res.status(500).send("Handshake failed. Ensure your Shopify App settings match your Railway URL.");
-    }
-});
-
-// 3. PRODUCT INJECTION: Push AI product to the live Shopify store
-app.post('/api/launch', async (req, res) => {
-    const { name, script, shopUrl, userToken, imageUrl } = req.body;
-    try {
-        const response = await axios.post(`https://${shopUrl}/admin/api/2024-01/products.json`, {
-            product: {
-                title: name,
-                body_html: `<div>${script}</div>`,
-                vendor: "Forge AI",
-                status: "active",
-                images: [{ src: imageUrl }]
-            }
-        }, {
-            headers: { 'X-Shopify-Access-Token': userToken }
-        });
-        res.json({ success: true, url: `https://${shopUrl}/products/${response.data.product.handle}` });
-    } catch (error) {
-        res.status(500).json({ error: "Shopify API rejected the product injection." });
+        console.error("❌ OAuth Error:", error.response?.data || error.message);
+        res.status(500).send("Handshake failed. Check Railway environment variables and Shopify API keys.");
     }
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`🚀 Forge Engine processing on port ${PORT}`));
+app.listen(PORT, () => console.log(`🔥 Forge Engine burning on port ${PORT}`));
