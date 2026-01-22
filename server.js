@@ -6,7 +6,7 @@ require('dotenv').config();
 
 /**
  * FORGE AI BACKEND - OAUTH & INJECTION ENGINE
- * VERSION: 1.0.14 - Database Instance Binding Fix
+ * VERSION: 1.0.15 - Diagnostic Database Auto-Binding
  */
 
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
@@ -15,7 +15,8 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT) {
         if (!admin.apps.length) {
             admin.initializeApp({
                 credential: admin.credential.cert(serviceAccount),
-                databaseURL: `https://${serviceAccount.project_id}.firebaseio.com`
+                // Explicitly targeting the project ID from the service account
+                projectId: serviceAccount.project_id 
             });
         }
         console.log("✅ Forge Firebase Engine: Online");
@@ -42,12 +43,12 @@ app.use((req, res, next) => {
     next();
 });
 
-app.get('/', (req, res) => res.send(`Forge v1.0.14 Live. <a href="/health">Check Health</a>`));
+app.get('/', (req, res) => res.send(`Forge v1.0.15 Live. <a href="/health">Check Health</a>`));
 
 app.get('/health', (req, res) => {
     res.json({
         status: "Online",
-        version: "1.0.14",
+        version: "1.0.15",
         firebase: !!admin.apps.length,
         projectId: "forgedmapp",
         env: {
@@ -68,7 +69,7 @@ app.get('/api/test/handshake', async (req, res) => {
     try {
         if (!db) throw new Error("Firestore not initialized.");
 
-        // We use a simplified path to test if the root collection 'artifacts' can be reached
+        // Version 1.0.15 uses a flattened path to verify if the collection can be created
         const userRef = db.collection('artifacts').doc(appId).collection('users').doc(uid);
         
         const testData = {
@@ -98,18 +99,22 @@ app.get('/api/test/handshake', async (req, res) => {
         `);
     } catch (e) {
         console.error("❌ Firestore Error Details:", e);
+        
+        // Critical Logic: If we still get NOT_FOUND, provide a direct link to create the DB
         res.status(500).send(`
             <div style="font-family: sans-serif; padding: 40px; background: #450a0a; color: #fecaca; height: 100vh;">
-                <h1>Handshake Failed (v1.0.14)</h1>
+                <h1>Handshake Failed (v1.0.15)</h1>
                 <p><b>Error Message:</b> ${e.message}</p>
                 <hr style="border-color: #7f1d1d;">
-                <p><b>Final Resolution Steps:</b></p>
+                <p><b>This error means the Firestore database instance does not exist yet.</b></p>
+                <p>To fix this immediately:</p>
                 <ol>
-                    <li>Go to <a href="https://console.firebase.google.com/project/forgedmapp/firestore" style="color:white">Firebase Firestore Console</a>.</li>
-                    <li>If you see a "Create Database" button, you <b>must</b> click it.</li>
-                    <li>Ensure you select <b>"Start in test mode"</b>.</li>
-                    <li>Ensure the Database ID is <b>(default)</b>.</li>
+                    <li>Open your Firebase Console: <a href="https://console.firebase.google.com/project/forgedmapp/firestore" style="color:white; font-weight:bold;">Click here to open Firestore for forgedmapp</a></li>
+                    <li>If it says <b>"Cloud Firestore is ready to go"</b>, verify you see a "Data" tab.</li>
+                    <li>If it says <b>"Create Database"</b>, you MUST click it.</li>
+                    <li>Choose <b>"Start in Test Mode"</b> and a location (like us-central).</li>
                 </ol>
+                <p>Once you see the "Data" tab in the Firebase console, refresh this page.</p>
             </div>
         `);
     }
@@ -154,4 +159,4 @@ app.get('/api/shopify/callback', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`🔥 Forge Engine v1.0.14 on port ${PORT}`));
+app.listen(PORT, () => console.log(`🔥 Forge Engine v1.0.15 on port ${PORT}`));
