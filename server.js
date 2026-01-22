@@ -6,7 +6,7 @@ require('dotenv').config();
 
 /**
  * FORGE AI BACKEND - OAUTH & INJECTION ENGINE
- * VERSION: 1.0.5 - Aligned with Shopify Callback
+ * VERSION: 1.0.6 - Debugging & Route Verification
  */
 
 // Initialize Firebase
@@ -24,29 +24,41 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT) {
 
 const db = admin.firestore();
 const app = express();
+
+// 1. GLOBAL MIDDLEWARE
 app.use(cors());
 app.use(express.json());
+
+// Request Logger: This will help us see exactly what Railway is receiving
+app.use((req, res, next) => {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+    next();
+});
 
 // Environment Variables from Railway
 const SHOPIFY_API_KEY = process.env.SHOPIFY_CLIENT_ID;
 const SHOPIFY_API_SECRET = process.env.SHOPIFY_CLIENT_SECRET;
 const BACKEND_URL = "https://forge-backend-production-b124.up.railway.app";
 
-// 1. HEALTH CHECK (Verify this version is live)
+// 2. PRIMARY ENDPOINTS
+
+// HEALTH CHECK (Verify this version is live)
 app.get('/health', (req, res) => {
     res.json({
         status: "Online",
-        version: "1.0.5",
+        version: "1.0.6",
+        timestamp: new Date().toISOString(),
         endpoints: ["/api/auth/shopify", "/api/shopify/callback", "/api/test/handshake"],
         firebase: !!admin.apps.length
     });
 });
 
-app.get('/', (req, res) => res.send("Forge Engine is running. Visit /health for status."));
+app.get('/', (req, res) => {
+    res.send("Forge Engine is running. Visit /health to verify endpoints.");
+});
 
 /**
  * TEST ENDPOINT: SIMULATE HANDSHAKE SUCCESS
- * Use this to verify Firebase updates and UI transitions without a real Shopify store.
  * URL: /api/test/handshake?uid=YOUR_UID
  */
 app.get('/api/test/handshake', async (req, res) => {
@@ -146,5 +158,13 @@ app.get('/api/shopify/callback', async (req, res) => {
     }
 });
 
+// Catch-all for 404s
+app.use((req, res) => {
+    res.status(404).send(`Route ${req.url} not found on this server.`);
+});
+
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`🔥 Forge Engine burning on port ${PORT}`));
+app.listen(PORT, () => {
+    console.log(`🔥 Forge Engine burning on port ${PORT}`);
+    console.log(`📍 Health check available at ${BACKEND_URL}/health`);
+});
