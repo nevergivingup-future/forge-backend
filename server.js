@@ -6,7 +6,7 @@ require('dotenv').config();
 
 /**
  * FORGE AI BACKEND - OAUTH & INJECTION ENGINE
- * VERSION: 1.0.11 - Enhanced Test Suite & Path Debugging
+ * VERSION: 1.0.12 - Forced Path Initialization
  */
 
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
@@ -38,12 +38,12 @@ app.use((req, res, next) => {
     next();
 });
 
-app.get('/', (req, res) => res.send(`Forge v1.0.11 Live. <a href="/health">Check Health</a>`));
+app.get('/', (req, res) => res.send(`Forge v1.0.12 Live. <a href="/health">Check Health</a>`));
 
 app.get('/health', (req, res) => {
     res.json({
         status: "Online",
-        version: "1.0.11",
+        version: "1.0.12",
         firebase: !!admin.apps.length,
         firestorePath: `/artifacts/${appId}/users/{uid}`,
         env: {
@@ -64,7 +64,8 @@ app.get('/api/test/handshake', async (req, res) => {
     try {
         if (!db) throw new Error("Database (Admin SDK) not initialized. Check FIREBASE_SERVICE_ACCOUNT.");
 
-        // We use the full path syntax which is required for the platform's security rules
+        // We use the full path syntax. 
+        // 5 NOT_FOUND can happen if the database "Default" isn't active.
         const userRef = db.collection('artifacts').doc(appId).collection('users').doc(uid);
         
         const testData = {
@@ -74,6 +75,7 @@ app.get('/api/test/handshake', async (req, res) => {
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
         };
 
+        // Explicitly check for db existence by attempting a write
         await userRef.set(testData, { merge: true });
 
         console.log(`✅ Success: Updated user ${uid} to Commander rank.`);
@@ -88,7 +90,6 @@ app.get('/api/test/handshake', async (req, res) => {
                             Path: /artifacts/${appId}/users/${uid}<br>
                             Status: COMMANDER_ACTIVATED
                         </div>
-                        <p style="color: #6ee7b7; font-size: 0.9rem;">Your Forge UI will now update automatically.</p>
                         <script>
                             localStorage.setItem('rank_${uid}', 'Commander');
                             setTimeout(() => window.close(), 4000);
@@ -99,11 +100,19 @@ app.get('/api/test/handshake', async (req, res) => {
         `);
     } catch (e) {
         console.error("❌ Handshake Error:", e.message);
+        // Specifically checking for common causes of 5 NOT_FOUND
+        let helpText = "Ensure Firestore is enabled in the Google Cloud Console.";
+        if (e.message.includes("NOT_FOUND")) {
+            helpText = "The Firestore database 'default' was not found. Please ensure you have created the database in the Firebase Console (Firestore -> Create Database).";
+        }
+
         res.status(500).send(`
             <div style="font-family: sans-serif; padding: 40px; background: #450a0a; color: #fecaca; height: 100vh;">
                 <h1>Handshake Test Failed</h1>
-                <p><b>Error:</b> ${e.message}</p>
-                <p>Ensure Firestore is enabled in the Google Cloud Console and the Service Account has 'Editor' or 'Owner' permissions.</p>
+                <p><b>Error Code:</b> 5 NOT_FOUND</p>
+                <p><b>Details:</b> ${e.message}</p>
+                <hr style="border-color: #7f1d1d;">
+                <p>${helpText}</p>
             </div>
         `);
     }
@@ -160,4 +169,4 @@ app.get('/api/shopify/callback', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`🔥 Forge Engine v1.0.11 active on port ${PORT}`));
+app.listen(PORT, () => console.log(`🔥 Forge Engine v1.0.12 active on port ${PORT}`));
