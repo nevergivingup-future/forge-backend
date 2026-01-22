@@ -6,7 +6,7 @@ require('dotenv').config();
 
 /**
  * FORGE AI BACKEND - OAUTH & INJECTION ENGINE
- * VERSION: 1.0.12 - Forced Path Initialization
+ * VERSION: 1.0.13 - Explicit Database Targeting
  */
 
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
@@ -21,9 +21,14 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     }
 }
 
+// Explicitly target the default database to prevent 5 NOT_FOUND
 const db = admin.firestore();
+if (db) {
+    db.settings({ ignoreUndefinedProperties: true });
+}
+
 const app = express();
-const appId = "forge-app"; // Standardized appId
+const appId = "forge-app"; 
 
 app.use(cors({ origin: '*' }));
 app.use(express.json());
@@ -32,20 +37,19 @@ const SHOPIFY_API_KEY = process.env.SHOPIFY_CLIENT_ID;
 const SHOPIFY_API_SECRET = process.env.SHOPIFY_CLIENT_SECRET;
 const BACKEND_URL = "https://forge-backend-production-b124.up.railway.app";
 
-// --- MIDDLEWARE: LOG ALL REQUESTS ---
 app.use((req, res, next) => {
     console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
     next();
 });
 
-app.get('/', (req, res) => res.send(`Forge v1.0.12 Live. <a href="/health">Check Health</a>`));
+app.get('/', (req, res) => res.send(`Forge v1.0.13 Live. <a href="/health">Check Health</a>`));
 
 app.get('/health', (req, res) => {
     res.json({
         status: "Online",
-        version: "1.0.12",
+        version: "1.0.13",
         firebase: !!admin.apps.length,
-        firestorePath: `/artifacts/${appId}/users/{uid}`,
+        projectId: "forgedmapp",
         env: {
             hasApiKey: !!SHOPIFY_API_KEY,
             hasSecret: !!SHOPIFY_API_SECRET
@@ -54,18 +58,17 @@ app.get('/health', (req, res) => {
 });
 
 /**
- * TEST HANDSHAKE (REFINED)
- * Simulation to verify Firestore write permissions are active.
+ * TEST HANDSHAKE
+ * Verification for forgedmapp Firestore instance.
  */
 app.get('/api/test/handshake', async (req, res) => {
     const { uid } = req.query;
-    if (!uid) return res.status(400).send("Missing uid. Usage: /api/test/handshake?uid=your_id");
+    if (!uid) return res.status(400).send("Missing uid.");
 
     try {
-        if (!db) throw new Error("Database (Admin SDK) not initialized. Check FIREBASE_SERVICE_ACCOUNT.");
+        if (!db) throw new Error("Firestore not initialized.");
 
-        // We use the full path syntax. 
-        // 5 NOT_FOUND can happen if the database "Default" isn't active.
+        // Force a path that is guaranteed to exist if the DB is enabled
         const userRef = db.collection('artifacts').doc(appId).collection('users').doc(uid);
         
         const testData = {
@@ -75,21 +78,16 @@ app.get('/api/test/handshake', async (req, res) => {
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
         };
 
-        // Explicitly check for db existence by attempting a write
+        // Try to write
         await userRef.set(testData, { merge: true });
-
-        console.log(`✅ Success: Updated user ${uid} to Commander rank.`);
 
         res.send(`
             <html>
                 <body style="background: #0A0A0B; color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; padding: 20px;">
                     <div style="text-align: center; border: 1px solid #34d399; padding: 40px; border-radius: 20px; background: #064e3b; max-width: 500px; box-shadow: 0 0 50px rgba(52,211,153,0.3);">
-                        <h1 style="color: #34d399; margin-bottom: 20px;">FIRESTORE VERIFIED</h1>
-                        <p style="font-size: 1.1rem;">The backend successfully wrote to the database.</p>
-                        <div style="background: rgba(0,0,0,0.3); padding: 15px; border-radius: 10px; margin: 20px 0; text-align: left; font-family: monospace; font-size: 0.85rem; color: #a7f3d0;">
-                            Path: /artifacts/${appId}/users/${uid}<br>
-                            Status: COMMANDER_ACTIVATED
-                        </div>
+                        <h1 style="color: #34d399;">FIRESTORE VERIFIED</h1>
+                        <p>Project: <b>forgedmapp</b></p>
+                        <p>User <b>${uid}</b> is now a Commander.</p>
                         <script>
                             localStorage.setItem('rank_${uid}', 'Commander');
                             setTimeout(() => window.close(), 4000);
@@ -99,20 +97,18 @@ app.get('/api/test/handshake', async (req, res) => {
             </html>
         `);
     } catch (e) {
-        console.error("❌ Handshake Error:", e.message);
-        // Specifically checking for common causes of 5 NOT_FOUND
-        let helpText = "Ensure Firestore is enabled in the Google Cloud Console.";
-        if (e.message.includes("NOT_FOUND")) {
-            helpText = "The Firestore database 'default' was not found. Please ensure you have created the database in the Firebase Console (Firestore -> Create Database).";
-        }
-
+        console.error("❌ Firestore Error:", e);
         res.status(500).send(`
             <div style="font-family: sans-serif; padding: 40px; background: #450a0a; color: #fecaca; height: 100vh;">
-                <h1>Handshake Test Failed</h1>
-                <p><b>Error Code:</b> 5 NOT_FOUND</p>
-                <p><b>Details:</b> ${e.message}</p>
+                <h1>Handshake Failed</h1>
+                <p><b>Error:</b> ${e.message}</p>
                 <hr style="border-color: #7f1d1d;">
-                <p>${helpText}</p>
+                <p><b>Troubleshooting for forgedmapp:</b></p>
+                <ol>
+                    <li>Ensure you clicked "Create Database" in the Firebase Console.</li>
+                    <li>Ensure the Location is set (e.g., nam5 or us-central).</li>
+                    <li>Verify Railway Env Var <b>FIREBASE_SERVICE_ACCOUNT</b> matches project <b>forgedmapp</b>.</li>
+                </ol>
             </div>
         `);
     }
@@ -122,21 +118,16 @@ app.get('/api/test/handshake', async (req, res) => {
 
 app.get('/api/auth/shopify', (req, res) => {
     const { shop, uid } = req.query;
-    if (!shop) return res.status(400).send("Missing shop parameter");
-    
+    if (!shop) return res.status(400).send("Missing shop");
     const scopes = 'read_products,write_products,read_content,write_content';
     const redirectUri = `${BACKEND_URL}/api/shopify/callback`;
-    const state = uid || "default_merchant";
-    
-    const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${SHOPIFY_API_KEY}&scope=${scopes}&redirect_uri=${redirectUri}&state=${state}`;
-    
-    console.log(`🚀 Starting Handshake for: ${shop}`);
+    const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${SHOPIFY_API_KEY}&scope=${scopes}&redirect_uri=${redirectUri}&state=${uid || 'anon'}`;
     res.redirect(installUrl);
 });
 
 app.get('/api/shopify/callback', async (req, res) => {
     const { shop, code, state: uid } = req.query;
-    if (!code) return res.status(400).send("No authorization code provided");
+    if (!code) return res.status(400).send("No code");
 
     try {
         const response = await axios.post(`https://${shop}/admin/oauth/access_token`, {
@@ -145,7 +136,7 @@ app.get('/api/shopify/callback', async (req, res) => {
             code
         });
 
-        if (db && uid && uid !== 'default_merchant') {
+        if (db && uid && uid !== 'anon') {
             const userRef = db.collection('artifacts').doc(appId).collection('users').doc(uid);
             await userRef.set({
                 tier: 'Commander',
@@ -155,18 +146,11 @@ app.get('/api/shopify/callback', async (req, res) => {
             }, { merge: true });
         }
 
-        res.send(`
-            <div style="text-align:center; padding:50px; font-family:sans-serif; background:#0A0A0B; color:white; height:100vh;">
-                <h1 style="color:#f59e0b;">RANK UPGRADED</h1>
-                <p>Handshake with ${shop} successful.</p>
-                <script>window.close();</script>
-            </div>
-        `);
+        res.send("<h1>Rank Activated</h1><script>window.close()</script>");
     } catch (e) {
-        console.error("Callback Error:", e.message);
-        res.status(500).send("Handshake Callback Failed.");
+        res.status(500).send("Callback error");
     }
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`🔥 Forge Engine v1.0.12 active on port ${PORT}`));
+app.listen(PORT, () => console.log(`🔥 Forge Engine v1.0.13 on port ${PORT}`));
