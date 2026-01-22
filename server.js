@@ -6,25 +6,33 @@ require('dotenv').config();
 
 /**
  * FORGE AI BACKEND - OAUTH & INJECTION ENGINE
- * VERSION: 1.0.16 - Final Handshake Diagnostic
+ * VERSION: 1.0.17 - Explicit Project & Permission Binding
  */
+
+let db;
 
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     try {
         const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+        
+        // Use explicit project ID from the JSON to avoid "Project not found" listing errors
         if (!admin.apps.length) {
             admin.initializeApp({
                 credential: admin.credential.cert(serviceAccount),
                 projectId: serviceAccount.project_id 
             });
         }
-        console.log("✅ Forge Firebase Engine: Online");
+        
+        db = admin.firestore();
+        // Force settings to ensure we are connecting to the correct instance
+        db.settings({ ignoreUndefinedProperties: true });
+        
+        console.log(`✅ Forge Firebase Engine: Online (Project: ${serviceAccount.project_id})`);
     } catch (e) {
         console.error("❌ Firebase Init Error:", e.message);
     }
 }
 
-const db = admin.firestore();
 const app = express();
 const appId = "forge-app"; 
 
@@ -40,12 +48,12 @@ app.use((req, res, next) => {
     next();
 });
 
-app.get('/', (req, res) => res.send(`Forge v1.0.16 Live. <a href="/health">Check Health</a>`));
+app.get('/', (req, res) => res.send(`Forge v1.0.17 Live. <a href="/health">Check Health</a>`));
 
 app.get('/health', (req, res) => {
     res.json({
         status: "Online",
-        version: "1.0.16",
+        version: "1.0.17",
         firebase: !!admin.apps.length,
         projectId: "forgedmapp",
         env: {
@@ -64,14 +72,14 @@ app.get('/api/test/handshake', async (req, res) => {
     if (!uid) return res.status(400).send("Missing uid.");
 
     try {
-        if (!db) throw new Error("Firestore not initialized.");
+        if (!db) throw new Error("Firestore not initialized. Check your Service Account JSON.");
 
         const userRef = db.collection('artifacts').doc(appId).collection('users').doc(uid);
         
         await userRef.set({
             tier: 'Commander',
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            diagnostic: "v1.0.16-passed"
+            diagnostic: "v1.0.17-passed"
         }, { merge: true });
 
         res.send(`
@@ -80,7 +88,7 @@ app.get('/api/test/handshake', async (req, res) => {
                     <div style="text-align: center; border: 1px solid #34d399; padding: 40px; border-radius: 20px; background: #064e3b; max-width: 500px; box-shadow: 0 0 50px rgba(52,211,153,0.3);">
                         <h1 style="color: #34d399;">FIRESTORE VERIFIED</h1>
                         <p>Project: <b>forgedmapp</b></p>
-                        <p>Status: Commander Rank Unlocked.</p>
+                        <p>Status: Permission binding successful.</p>
                         <script>
                             localStorage.setItem('rank_${uid}', 'Commander');
                             setTimeout(() => window.close(), 4000);
@@ -93,19 +101,17 @@ app.get('/api/test/handshake', async (req, res) => {
         console.error("❌ Firestore Error:", e);
         res.status(500).send(`
             <div style="font-family: sans-serif; padding: 40px; background: #1a1a1a; color: #fecaca; height: 100vh; line-height: 1.6;">
-                <h1 style="color: #ef4444;">Action Required: Database Not Started</h1>
-                <p>Your Firebase Project <b>forgedmapp</b> exists, but the Firestore Database is not active.</p>
+                <h1 style="color: #ef4444;">Project Discovery Error</h1>
+                <p>Firebase cannot find project <b>forgedmapp</b> or permissions are insufficient.</p>
                 <div style="background: #2d2d2d; padding: 20px; border-radius: 10px; margin: 20px 0; border-left: 5px solid #ef4444;">
-                    <strong>To fix this in 30 seconds:</strong>
+                    <strong>Critical Fix:</strong>
                     <ol>
-                        <li>Click your project <b>ForgeDMapp</b> on your screen.</li>
-                        <li>In the left sidebar, click <b>Build</b> -> <b>Firestore Database</b>.</li>
-                        <li>Click the big <b>"Create Database"</b> button.</li>
-                        <li>Select <b>"Start in Test Mode"</b> (very important).</li>
-                        <li>Click <b>Next</b> and then <b>Enable</b>.</li>
+                        <li>In Google Cloud Console, ensure the Service Account has the <b>"Cloud Datastore User"</b> or <b>"Editor"</b> role.</li>
+                        <li>Ensure you are using the Service Account JSON specifically generated for <b>forgedmapp</b>.</li>
+                        <li>Go to <b>Project Settings > Service Accounts</b> and click <b>"Generate new private key"</b> if the current one is failing.</li>
                     </ol>
                 </div>
-                <p>Once you see the Firestore dashboard with a "Data" tab, refresh this handshake page.</p>
+                <p><b>Technical Error:</b> ${e.message}</p>
             </div>
         `);
     }
@@ -148,4 +154,4 @@ app.get('/api/shopify/callback', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`🔥 Forge Engine v1.0.16 active`));
+app.listen(PORT, () => console.log(`🔥 Forge Engine v1.0.17 active`));
