@@ -6,26 +6,26 @@ require('dotenv').config();
 
 /**
  * FORGE AI BACKEND - OAUTH & INJECTION ENGINE
- * VERSION: 1.0.13 - Explicit Database Targeting
+ * VERSION: 1.0.14 - Database Instance Binding Fix
  */
 
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     try {
         const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-        admin.initializeApp({
-            credential: admin.credential.cert(serviceAccount)
-        });
+        if (!admin.apps.length) {
+            admin.initializeApp({
+                credential: admin.credential.cert(serviceAccount),
+                databaseURL: `https://${serviceAccount.project_id}.firebaseio.com`
+            });
+        }
         console.log("✅ Forge Firebase Engine: Online");
     } catch (e) {
         console.error("❌ Firebase Init Error:", e.message);
     }
 }
 
-// Explicitly target the default database to prevent 5 NOT_FOUND
+// Ensure we are targeting the project-specific Firestore instance
 const db = admin.firestore();
-if (db) {
-    db.settings({ ignoreUndefinedProperties: true });
-}
 
 const app = express();
 const appId = "forge-app"; 
@@ -42,12 +42,12 @@ app.use((req, res, next) => {
     next();
 });
 
-app.get('/', (req, res) => res.send(`Forge v1.0.13 Live. <a href="/health">Check Health</a>`));
+app.get('/', (req, res) => res.send(`Forge v1.0.14 Live. <a href="/health">Check Health</a>`));
 
 app.get('/health', (req, res) => {
     res.json({
         status: "Online",
-        version: "1.0.13",
+        version: "1.0.14",
         firebase: !!admin.apps.length,
         projectId: "forgedmapp",
         env: {
@@ -68,7 +68,7 @@ app.get('/api/test/handshake', async (req, res) => {
     try {
         if (!db) throw new Error("Firestore not initialized.");
 
-        // Force a path that is guaranteed to exist if the DB is enabled
+        // We use a simplified path to test if the root collection 'artifacts' can be reached
         const userRef = db.collection('artifacts').doc(appId).collection('users').doc(uid);
         
         const testData = {
@@ -78,7 +78,7 @@ app.get('/api/test/handshake', async (req, res) => {
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
         };
 
-        // Try to write
+        // Execution of write
         await userRef.set(testData, { merge: true });
 
         res.send(`
@@ -87,7 +87,7 @@ app.get('/api/test/handshake', async (req, res) => {
                     <div style="text-align: center; border: 1px solid #34d399; padding: 40px; border-radius: 20px; background: #064e3b; max-width: 500px; box-shadow: 0 0 50px rgba(52,211,153,0.3);">
                         <h1 style="color: #34d399;">FIRESTORE VERIFIED</h1>
                         <p>Project: <b>forgedmapp</b></p>
-                        <p>User <b>${uid}</b> is now a Commander.</p>
+                        <p>Status: Database instance reached successfully.</p>
                         <script>
                             localStorage.setItem('rank_${uid}', 'Commander');
                             setTimeout(() => window.close(), 4000);
@@ -97,17 +97,18 @@ app.get('/api/test/handshake', async (req, res) => {
             </html>
         `);
     } catch (e) {
-        console.error("❌ Firestore Error:", e);
+        console.error("❌ Firestore Error Details:", e);
         res.status(500).send(`
             <div style="font-family: sans-serif; padding: 40px; background: #450a0a; color: #fecaca; height: 100vh;">
-                <h1>Handshake Failed</h1>
-                <p><b>Error:</b> ${e.message}</p>
+                <h1>Handshake Failed (v1.0.14)</h1>
+                <p><b>Error Message:</b> ${e.message}</p>
                 <hr style="border-color: #7f1d1d;">
-                <p><b>Troubleshooting for forgedmapp:</b></p>
+                <p><b>Final Resolution Steps:</b></p>
                 <ol>
-                    <li>Ensure you clicked "Create Database" in the Firebase Console.</li>
-                    <li>Ensure the Location is set (e.g., nam5 or us-central).</li>
-                    <li>Verify Railway Env Var <b>FIREBASE_SERVICE_ACCOUNT</b> matches project <b>forgedmapp</b>.</li>
+                    <li>Go to <a href="https://console.firebase.google.com/project/forgedmapp/firestore" style="color:white">Firebase Firestore Console</a>.</li>
+                    <li>If you see a "Create Database" button, you <b>must</b> click it.</li>
+                    <li>Ensure you select <b>"Start in test mode"</b>.</li>
+                    <li>Ensure the Database ID is <b>(default)</b>.</li>
                 </ol>
             </div>
         `);
@@ -153,4 +154,4 @@ app.get('/api/shopify/callback', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`🔥 Forge Engine v1.0.13 on port ${PORT}`));
+app.listen(PORT, () => console.log(`🔥 Forge Engine v1.0.14 on port ${PORT}`));
