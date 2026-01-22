@@ -6,7 +6,7 @@ require('dotenv').config();
 
 /**
  * FORGE AI BACKEND - OAUTH & INJECTION ENGINE
- * VERSION: 1.0.8 - Firestore Path Alignment
+ * VERSION: 1.0.9 - Auto-Initialization of Root Paths
  */
 
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
@@ -32,12 +32,12 @@ const SHOPIFY_API_KEY = process.env.SHOPIFY_CLIENT_ID;
 const SHOPIFY_API_SECRET = process.env.SHOPIFY_CLIENT_SECRET;
 const BACKEND_URL = "https://forge-backend-production-b124.up.railway.app";
 
-app.get('/', (req, res) => res.send(`Forge v1.0.8 Live. <a href="/health">Check Health</a>`));
+app.get('/', (req, res) => res.send(`Forge v1.0.9 Live. <a href="/health">Check Health</a>`));
 
 app.get('/health', (req, res) => {
     res.json({
         status: "Online",
-        version: "1.0.8",
+        version: "1.0.9",
         firebase: !!admin.apps.length,
         firestorePath: `/artifacts/${appId}/users/{uid}`
     });
@@ -54,8 +54,11 @@ app.get('/api/test/handshake', async (req, res) => {
     try {
         if (!db) throw new Error("Database not initialized");
 
+        // FIX FOR NOT_FOUND: Ensure the parent artifact document exists first
+        const rootRef = db.doc(`artifacts/${appId}`);
+        await rootRef.set({ lastActivity: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+
         // RULE 1: STRICT PATHS
-        // We update the user's private document to 'Commander'
         const userRef = db.doc(`artifacts/${appId}/users/${uid}`);
         
         await userRef.set({
@@ -108,6 +111,9 @@ app.get('/api/shopify/callback', async (req, res) => {
         });
 
         if (db && uid && uid !== 'anon') {
+            // Ensure parent exists in real flow too
+            await db.doc(`artifacts/${appId}`).set({ lastHandshake: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+            
             const userRef = db.doc(`artifacts/${appId}/users/${uid}`);
             await userRef.set({
                 tier: 'Commander',
@@ -124,4 +130,4 @@ app.get('/api/shopify/callback', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`🔥 Forge Engine v1.0.8 on port ${PORT}`));
+app.listen(PORT, () => console.log(`🔥 Forge Engine v1.0.9 on port ${PORT}`));
