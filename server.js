@@ -6,7 +6,7 @@ require('dotenv').config();
 
 /**
  * FORGE AI BACKEND - OAUTH & INJECTION ENGINE
- * VERSION: 1.0.10 - Resilient Firestore Write Logic
+ * VERSION: 1.0.11 - Enhanced Test Suite & Path Debugging
  */
 
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
@@ -32,59 +32,80 @@ const SHOPIFY_API_KEY = process.env.SHOPIFY_CLIENT_ID;
 const SHOPIFY_API_SECRET = process.env.SHOPIFY_CLIENT_SECRET;
 const BACKEND_URL = "https://forge-backend-production-b124.up.railway.app";
 
-app.get('/', (req, res) => res.send(`Forge v1.0.10 Live. <a href="/health">Check Health</a>`));
+// --- MIDDLEWARE: LOG ALL REQUESTS ---
+app.use((req, res, next) => {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+    next();
+});
+
+app.get('/', (req, res) => res.send(`Forge v1.0.11 Live. <a href="/health">Check Health</a>`));
 
 app.get('/health', (req, res) => {
     res.json({
         status: "Online",
-        version: "1.0.10",
+        version: "1.0.11",
         firebase: !!admin.apps.length,
-        firestorePath: `/artifacts/${appId}/users/{uid}`
+        firestorePath: `/artifacts/${appId}/users/{uid}`,
+        env: {
+            hasApiKey: !!SHOPIFY_API_KEY,
+            hasSecret: !!SHOPIFY_API_SECRET
+        }
     });
 });
 
 /**
- * TEST HANDSHAKE
+ * TEST HANDSHAKE (REFINED)
  * Simulation to verify Firestore write permissions are active.
  */
 app.get('/api/test/handshake', async (req, res) => {
     const { uid } = req.query;
-    if (!uid) return res.status(400).send("Missing uid.");
+    if (!uid) return res.status(400).send("Missing uid. Usage: /api/test/handshake?uid=your_id");
 
     try {
-        if (!db) throw new Error("Database not initialized");
+        if (!db) throw new Error("Database (Admin SDK) not initialized. Check FIREBASE_SERVICE_ACCOUNT.");
 
-        // Use collection/doc syntax which is often more robust for initial setup
-        const userRef = db
-            .collection('artifacts')
-            .doc(appId)
-            .collection('users')
-            .doc(uid);
+        // We use the full path syntax which is required for the platform's security rules
+        const userRef = db.collection('artifacts').doc(appId).collection('users').doc(uid);
         
-        await userRef.set({
+        const testData = {
             tier: 'Commander',
             shopUrl: 'test-store.myshopify.com',
-            shopifyToken: 'mock_token_12345',
+            shopifyToken: 'mock_token_' + Math.floor(Math.random() * 10000),
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        }, { merge: true });
+        };
+
+        await userRef.set(testData, { merge: true });
+
+        console.log(`✅ Success: Updated user ${uid} to Commander rank.`);
 
         res.send(`
             <html>
-                <body style="background: #0A0A0B; color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0;">
-                    <div style="text-align: center; border: 1px solid #34d399; padding: 40px; border-radius: 20px; background: #064e3b; max-width: 400px; box-shadow: 0 0 50px rgba(52,211,153,0.3);">
-                        <h1 style="color: #34d399;">FIRESTORE ACTIVE</h1>
-                        <p>User <b>${uid}</b> promoted to Commander.</p>
+                <body style="background: #0A0A0B; color: white; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; padding: 20px;">
+                    <div style="text-align: center; border: 1px solid #34d399; padding: 40px; border-radius: 20px; background: #064e3b; max-width: 500px; box-shadow: 0 0 50px rgba(52,211,153,0.3);">
+                        <h1 style="color: #34d399; margin-bottom: 20px;">FIRESTORE VERIFIED</h1>
+                        <p style="font-size: 1.1rem;">The backend successfully wrote to the database.</p>
+                        <div style="background: rgba(0,0,0,0.3); padding: 15px; border-radius: 10px; margin: 20px 0; text-align: left; font-family: monospace; font-size: 0.85rem; color: #a7f3d0;">
+                            Path: /artifacts/${appId}/users/${uid}<br>
+                            Status: COMMANDER_ACTIVATED
+                        </div>
+                        <p style="color: #6ee7b7; font-size: 0.9rem;">Your Forge UI will now update automatically.</p>
                         <script>
                             localStorage.setItem('rank_${uid}', 'Commander');
-                            setTimeout(() => window.close(), 3000);
+                            setTimeout(() => window.close(), 4000);
                         </script>
                     </div>
                 </body>
             </html>
         `);
     } catch (e) {
-        console.error("Firestore Test Error:", e.message);
-        res.status(500).send("Handshake Test Failed: " + e.message);
+        console.error("❌ Handshake Error:", e.message);
+        res.status(500).send(`
+            <div style="font-family: sans-serif; padding: 40px; background: #450a0a; color: #fecaca; height: 100vh;">
+                <h1>Handshake Test Failed</h1>
+                <p><b>Error:</b> ${e.message}</p>
+                <p>Ensure Firestore is enabled in the Google Cloud Console and the Service Account has 'Editor' or 'Owner' permissions.</p>
+            </div>
+        `);
     }
 });
 
@@ -92,16 +113,21 @@ app.get('/api/test/handshake', async (req, res) => {
 
 app.get('/api/auth/shopify', (req, res) => {
     const { shop, uid } = req.query;
-    if (!shop) return res.status(400).send("Missing shop");
+    if (!shop) return res.status(400).send("Missing shop parameter");
+    
     const scopes = 'read_products,write_products,read_content,write_content';
     const redirectUri = `${BACKEND_URL}/api/shopify/callback`;
-    const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${SHOPIFY_API_KEY}&scope=${scopes}&redirect_uri=${redirectUri}&state=${uid || 'anon'}`;
+    const state = uid || "default_merchant";
+    
+    const installUrl = `https://${shop}/admin/oauth/authorize?client_id=${SHOPIFY_API_KEY}&scope=${scopes}&redirect_uri=${redirectUri}&state=${state}`;
+    
+    console.log(`🚀 Starting Handshake for: ${shop}`);
     res.redirect(installUrl);
 });
 
 app.get('/api/shopify/callback', async (req, res) => {
     const { shop, code, state: uid } = req.query;
-    if (!code) return res.status(400).send("No code");
+    if (!code) return res.status(400).send("No authorization code provided");
 
     try {
         const response = await axios.post(`https://${shop}/admin/oauth/access_token`, {
@@ -110,13 +136,8 @@ app.get('/api/shopify/callback', async (req, res) => {
             code
         });
 
-        if (db && uid && uid !== 'anon') {
-            const userRef = db
-                .collection('artifacts')
-                .doc(appId)
-                .collection('users')
-                .doc(uid);
-
+        if (db && uid && uid !== 'default_merchant') {
+            const userRef = db.collection('artifacts').doc(appId).collection('users').doc(uid);
             await userRef.set({
                 tier: 'Commander',
                 shopUrl: shop,
@@ -125,12 +146,18 @@ app.get('/api/shopify/callback', async (req, res) => {
             }, { merge: true });
         }
 
-        res.send("<h1>Rank Activated</h1><script>window.close()</script>");
+        res.send(`
+            <div style="text-align:center; padding:50px; font-family:sans-serif; background:#0A0A0B; color:white; height:100vh;">
+                <h1 style="color:#f59e0b;">RANK UPGRADED</h1>
+                <p>Handshake with ${shop} successful.</p>
+                <script>window.close();</script>
+            </div>
+        `);
     } catch (e) {
         console.error("Callback Error:", e.message);
-        res.status(500).send("Callback error");
+        res.status(500).send("Handshake Callback Failed.");
     }
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`🔥 Forge Engine v1.0.10 on port ${PORT}`));
+app.listen(PORT, () => console.log(`🔥 Forge Engine v1.0.11 active on port ${PORT}`));
