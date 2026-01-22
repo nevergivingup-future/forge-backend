@@ -6,7 +6,7 @@ require('dotenv').config();
 
 /**
  * FORGE AI BACKEND - OAUTH & INJECTION ENGINE
- * VERSION: 1.0.20 - Merchant Auto-Upgrade Integration
+ * VERSION: 1.0.21 - Ready for Live Testing
  */
 
 let db;
@@ -48,12 +48,12 @@ app.use((req, res, next) => {
     next();
 });
 
-app.get('/', (req, res) => res.send(`Forge v1.0.20 Live. <a href="/health">Check Health</a>`));
+app.get('/', (req, res) => res.send(`Forge v1.0.21 Live. <a href="/health">Check Health</a>`));
 
 app.get('/health', (req, res) => {
     res.json({
         status: "Online",
-        version: "1.0.20",
+        version: "1.0.21",
         firebase: !!admin.apps.length,
         projectId: initializedProjectId,
         env: {
@@ -81,7 +81,7 @@ app.get('/api/test/handshake', async (req, res) => {
         await userRef.set({
             tier: 'Commander',
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-            diagnostic: "v1.0.20-passed",
+            diagnostic: "v1.0.21-passed",
             projectBound: initializedProjectId
         }, { merge: true });
 
@@ -93,7 +93,7 @@ app.get('/api/test/handshake', async (req, res) => {
                     <div style="text-align: center; border: 1px solid #34d399; padding: 40px; border-radius: 20px; background: #064e3b; max-width: 500px; box-shadow: 0 0 50px rgba(52,211,153,0.3);">
                         <h1 style="color: #34d399;">FIRESTORE VERIFIED</h1>
                         <p>Project: <b>${initializedProjectId}</b></p>
-                        <p>Status: Handshake Success (v1.0.20).</p>
+                        <p>Status: Handshake Success (v1.0.21).</p>
                         <script>
                             localStorage.setItem('rank_${uid}', 'Commander');
                             setTimeout(() => window.close(), 4000);
@@ -106,7 +106,7 @@ app.get('/api/test/handshake', async (req, res) => {
         console.error("❌ Firestore Error:", e);
         res.status(500).send(`
             <div style="font-family: sans-serif; padding: 40px; background: #1a1a1a; color: #fecaca; height: 100vh; line-height: 1.6;">
-                <h1 style="color: #ef4444;">Handshake Failed (v1.0.20)</h1>
+                <h1 style="color: #ef4444;">Handshake Failed (v1.0.21)</h1>
                 <p><b>Technical Error:</b> ${e.message}</p>
                 <hr style="border-color: #7f1d1d;">
                 <p><b>Diagnosis for ${initializedProjectId}:</b></p>
@@ -181,4 +181,4 @@ app.get('/api/shopify/callback', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`🔥 Forge Engine v1.0.20 active`));
+app.listen(PORT, () => console.log(`🔥 Forge Engine v1.0.21 active`));
